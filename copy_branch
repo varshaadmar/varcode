@@ -1,0 +1,130 @@
+#!usr/bin/env python3
+
+from P4 import P4, P4Exception
+import sys, os
+
+print("********COPY PRIVATE BRANCHES********")
+
+#variables from Jenkins
+source = os.environ['SOURCE']
+target = os.environ['TARGET']
+blind_copy = os.environ['COPY_ENTIRE_BRANCH']
+subfolders = os.environ['SUBFOLDERS']
+
+#create p4 instance
+p4 = P4()
+p4.exception_level = 1
+
+def connect_to_perforce():
+
+	#connect to perforce server
+
+	print("Connecting to perforce...")
+
+	try:
+		p4.connect()
+		print("Connection successful")
+	except P4Exception:
+		for e in p4.errors:
+			print("ERROR : "+e+"\n")
+			
+def revert_open_files():
+
+	#revert all opened files in the current client
+	
+	res = p4.run("revert","//...")
+	
+	if res :
+		print("\nReverting files :")
+		n = 0
+		for file in res:
+			for key,val in file.items():
+				print(key+" : "+val)
+			print("")
+			n = n+1
+		print(n," files reverted\n")
+			
+def create_changelist():
+	
+	#creates a new changelist
+	
+	desc = {"Description": "Merge private branches", "Change": "new"}
+	p4.input = desc
+	res = p4.run( "change", "-i" )
+	num = res[0].split()[1]
+	
+	print("Changelist created : ",num,"\n")
+	
+	return num
+		
+def submit_changelist(change):
+	
+	#submit the changelist
+	
+	print("\nSubmitting files :")
+	
+	output = p4.run("submit","-c",change)
+	
+	k = 0
+	for file in output:
+		for key,val in file.items():
+			print(key+" : "+val)
+		print("")
+		k = k+1
+	print(k-2," files submitted\n")
+
+#do the copy here
+if blind_copy == "true":
+	if subfolders == "None":
+		
+		connect_to_perforce()
+		
+		print("COPY : Copying entire branch blindly...")
+		
+		revert_open_files()
+		
+		cl_num = create_changelist()
+		
+		result = p4.run("copy","-c",cl_num,"-f",source+"/...",target+"/...")
+		
+		print("COPY : Completed")
+		print(len(result)," file(s) copied")
+		if len(result) == 0:
+			print("\nNo files opened\nFile(s) up to date")
+		else:
+			submit_changelist(cl_num)
+	
+	else:
+		print("ERROR : Please check if you have entered appropriate parameters\n\tLeave the 'subfolders' field as it is if you want to copy the entire branch")
+		sys.exit(1)
+
+else:
+	if subfolders == "None":
+		print("ERROR : Please check if you have entered appropriate parameters\n\tTick the 'COPY_ENTIRE_BRANCH' field if you want to copy the entire branch")
+		sys.exit(1)
+	
+	else:
+		connect_to_perforce()
+		
+		print("COPY : Copying specific folders...")
+		
+		subfolders_list = list(subfolders.split(','))
+		
+		revert_open_files()
+		
+		cl_num = create_changelist()
+		
+		nfiles = 0
+		for subfolder in subfolders_list:
+			print("Copying subfolder : "+subfolder)
+			result = p4.run("copy","-c",cl_num,"-f",source+"/"+subfolder+"/...",target+"/"+subfolder+"/...")
+			nfiles = nfiles+len(result)
+		print("COPY : Completed")
+		print(nfiles," file(s) copied")
+		if nfiles == 0:
+				print("\nNo files opened\nFile(s) up to date")
+		else:
+			submit_changelist(cl_num)
+		
+#disconnect from perforce	
+p4.disconnect()
